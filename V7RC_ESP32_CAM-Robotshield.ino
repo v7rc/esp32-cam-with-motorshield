@@ -10,10 +10,10 @@
 #define SERVO_DEFAULT_MAX_VALUE 2000
 #define SERVO_DEFAULT_MIN_VALUE 1000
 #define PACKET_LENGTH 20
-#define numOfServo 1
+#define numOfServo 4
 
-// Servo Pin,  目前先用1組;
-const int SERVO_Pin[] = { 2 };
+// Servo Pin,  目前先用1組(2)，其餘-1不處理;
+const int SERVO_Pin[] = { -1, -1, 2, -1 };
 Servo robotServo[numOfServo];
 
 int count = 0;  //計數用
@@ -26,8 +26,9 @@ int servoMINValue[numOfServo];      // 每個Servo最小的數值
 int bytes[PACKET_LENGTH];
 int receiveServoValue[numOfServo];
 
-int dcMotorPinA[] = { 13, 12 };  // DC motor A
-int dcMotorPinB[] = { 15, 14 };  // DC motor B
+int dcMotorPinA[] = { 12, 13 };  // DC motor A
+int dcMotorPinB[] = { 14, 15 };  // DC motor B
+
 
 long startProcessTime = 0;
 long endProcessTime = 0;
@@ -46,7 +47,8 @@ int accelPWMChannel = 1;                  // Channel0, 1, 2, 3, 4, 5, 6....
 bool isControlAccelerator = false;        // 是否需要限制油門;
 
 // Set these to your desired credentials.
-const char *ssid = "WiFi_ESP32";    //設定一組網路名稱(ssid)
+// const char *ssid = "WiFi_ESP32";  //設定一組網路名稱(ssid)
+char ssid[23];                      //設定一組網路名稱(ssid)
 const char *password = "12345678";  //設定一組網路密碼(pasword)
 
 WiFiUDP Udp;
@@ -201,11 +203,23 @@ void startCameraServer() {
 
 
 
+const char* versionInfo = "Version: Test_5"; // 編譯版本
+char burnDate[] = __DATE__; // 編譯日期
+char burnTime[] = __TIME__; // 編譯時間
+
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
   servoControlInit();
 
   Serial.begin(115200);
+  
+  Serial.println("========");
+  Serial.println(versionInfo);
+  Serial.print("burnDate:");
+  Serial.println(burnDate);
+  Serial.print("burnTime:");
+  Serial.println(burnTime);
+  Serial.println("========");
+
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -230,15 +244,19 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG;
 
   //init with high specs to pre-allocate larger buffers
-  if (psramFound()) {
-    config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 10;
-    config.fb_count = 2;
-  } else {
-    config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;
-    config.fb_count = 1;
-  }
+  // if (psramFound()) {
+  //   config.frame_size = FRAMESIZE_UXGA;
+  //   config.jpeg_quality = 10;
+  //   config.fb_count = 2;
+  // } else {
+  //   config.frame_size = FRAMESIZE_SVGA;
+  //   config.jpeg_quality = 12;
+  //   config.fb_count = 1;
+  // }
+
+  config.frame_size = FRAMESIZE_HVGA;
+  config.jpeg_quality = 10;
+  config.fb_count = 1;
 
   // camera init
   esp_err_t err = esp_camera_init(&config);
@@ -248,14 +266,19 @@ void setup() {
   }
 
   //drop down frame size for higher initial frame rate
-  sensor_t *s = esp_camera_sensor_get();
-  s->set_framesize(s, FRAMESIZE_VGA);
+  // sensor_t *s = esp_camera_sensor_get();
+  // s->set_framesize(s, FRAMESIZE_HVGA);
 
   WiFi.mode(WIFI_AP);
   Serial.println();
   Serial.println("Configuring soft-AP...");
 
   WiFi.softAPConfig(local_IP, gateway, subnet);
+
+
+  // 獲取ESP32的Chip ID
+  uint64_t chipid = ESP.getEfuseMac();                                               // 獲取EFUSE MAC地址，用於Chip ID
+  snprintf(ssid, 23, "ESP32_%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid);  // 將Chip ID格式化並存儲於ssid陣列
   WiFi.softAP(ssid, password);
 
   Serial.print("AP IP address: ");
@@ -310,7 +333,6 @@ void loop() {
     String receiveCommand = String(packetBuffer);
     processRCString(receiveCommand);
   }
-
 }
 
 
@@ -319,12 +341,13 @@ void servoControlInit() {
 
   // 設定Servo, 並且設定成預設1500;
 
-  for (int i = 0; i < (sizeof(SERVO_Pin) / sizeof(SERVO_Pin[0])); i++) 
-  {
+  for (int i = 0; i < (sizeof(SERVO_Pin) / sizeof(SERVO_Pin[0])); i++) {
 
     // servoMAXValue[i] = SERVO_DEFAULT_MAX_VALUE;
     // servoMINValue[i] = SERVO_DEFAULT_MIN_VALUE;
     // oldServValue[i] = SERVO_DEFAULT_VALUE;
+
+    if (SERVO_Pin[i] == -1) continue;
 
     robotServo[i].setPeriodHertz(50);
     //    robotServo[i].attach(SERVO_Pin[i], SERVO_DEFAULT_MIN_VALUE, SERVO_DEFAULT_MAX_VALUE); // 設定
@@ -361,7 +384,7 @@ void processRCString(String command) {
     return;
   }
 
-  Serial.println(command);
+  //  Serial.println(command);
 
 
   if (command.indexOf("SRV") > -1 || command.indexOf("SS4") > -1) {  // 表示伺服馬達操作;
@@ -717,9 +740,9 @@ void processServoCommand(int servoValue[]) {
 
   int thisIndex = 0;
   while (thisIndex < numOfServo && thisIndex < sizeof(servoValue)) {
-
-    robotServo[thisIndex].writeMicroseconds(servoValue[thisIndex]);
-
+    if (SERVO_Pin[thisIndex] != -1) {
+      robotServo[thisIndex].writeMicroseconds(servoValue[thisIndex]);
+    }
     thisIndex++;
   }
 }
